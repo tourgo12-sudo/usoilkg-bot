@@ -1,44 +1,26 @@
-import os, yfinance as yf, requests, time
-from datetime import datetime
+import yfinance as yf, requests, os, pandas as pd
+TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = "@xauusdakyl"
 
-BOT_TOKEN = os.environ.get("7765671322:AAEAOqiejTD34c_vYa-eAVm9kU01y1zlqBQ")
-CHAT_ID = "395504640"
-CHANNEL_ID = "@xauusdakyl"  # сенин каналын
-SYMBOL = "CL=F"
+def send(msg):
+    requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
 
-def send_to_all(msg):
-    for cid in [CHAT_ID, CHANNEL_ID]:
-        try:
-            url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-            requests.post(url, data={"chat_id": cid, "text": msg, "parse_mode": "Markdown"}, timeout=10)
-        except Exception as e:
-            print(e)
-
-def check_100():
-    try:
-        df = yf.download(SYMBOL, period="10d", interval="30m", progress=False)
-        if len(df) < 50: return
-        df['ATR'] = (df['High']-df['Low']).rolling(14).mean()
-        df['VolSMA'] = df['Volume'].rolling(20).mean()
-        df['High20'] = df['High'].rolling(20).max()
-        df['Low20'] = df['Low'].rolling(20).min()
-        last = df.iloc[-1]
-        prev = df.iloc[-2]
-
-        sweep = last['Low'] < df['Low20'].iloc[-2] and last['Close'] > last['Open']
-        choch = last['Close'] > df['High20'].iloc[-2] * 0.998
-        strong = abs(last['Close']-prev['Close']) > last['ATR']*1.5
-        vol = last['Volume'] > last['VolSMA']*1.8
-        zone = 88.5 < last['Low'] < 90.5
-
-        if sweep and choch and strong and vol and zone:
-            msg = f"""💎 *100% HANZO SETUP - USOIL*\n\n💰 Баа: ${last['Close']:.2f}\n🎯 TP: 91.07 / 92.45 / 93.75\n🛑 SL: 88.80\n\n✅ Sweep + Choch + ATR {last['ATR']:.2f}\n🕐 {datetime.now().strftime('%H:%M')}\n\n#USOIL #OIL"""
-            send_to_all(msg)
-    except Exception as e:
-        print(e)
-
-if __name__ == "__main__":
-    send_to_all("🤖 Usoilkg_bot @xauusdakyl каналга кошулду! 100% гана сигнал жөнөтөм.")
-    while True:
-        check_100()
-        time.sleep(1800)
+try:
+    usoil = yf.download("USO", period="5d", interval="1h", auto_adjust=True)
+    if len(usoil) < 30:
+        send("⚠️ USOIL маалымат аз")
+    else:
+        close = usoil['Close']
+        rsi = 100 - (100 / (1 + close.diff().where(close.diff()>0,0).rolling(14).mean() / -close.diff().where(close.diff()<0,0).rolling(14).mean()))
+        curr_rsi = float(rsi.iloc[-1])
+        price = float(close.iloc[-1])
+        ema = float(close.ewm(span=21).mean().iloc[-1])
+        
+        if curr_rsi < 35 and price > ema:
+            send(f"🟢 <b>USOIL 100% BUY</b>\nБаа: {price:.2f}\nRSI: {curr_rsi:.1f}\nTP: +2% SL: -1%")
+        elif curr_rsi > 65 and price < ema:
+            send(f"🔴 <b>USOIL 100% SELL</b>\nБаа: {price:.2f}\nRSI: {curr_rsi:.1f}\nTP: -2% SL: +1%")
+        else:
+            send(f"✅ Бот текшерилди\nUSOIL: {price:.2f} RSI: {curr_rsi:.1f}\n100% сигнал жок")
+except Exception as e:
+    send(f"❌ Ката: {e}")
