@@ -8,14 +8,13 @@ def send(t):
                  params={"chat_id": CHAT_ID, "text": t, "parse_mode": "HTML"}, timeout=15)
 
 try:
-    d = yf.download("USO", period="1d", interval="1h", auto_adjust=True)
-    # Жаңы yfinance үчүн оңдоо
-    close = d['Close']
-    try:
-        price = float(close.iloc[-1])
-    except:
-        price = float(close.iloc[-1].iloc[0])
-
-    send(f"✅ БОТ ИШТЕДИ!\nUSOIL: {price:.2f}\nБот даяр, ар 30 мүнөттө иштейт")
+    d = yf.download("USO", period="2d", interval="1h", auto_adjust=True)
+    # Series катасын 100% оңдоо
+    c = d['Close']
+    if hasattr(c, 'columns'):
+        c = c.iloc[:, 0]
+    price = float(c.iloc[-1])
+    send(f"✅ USOIL БОТ ДАЯР!\nБаа: ${price:.2f}\nЭми ар 30 мүнөттө автоматтык анализ берет")
 except Exception as e:
-    send(f"❌ Ката: {e}")
+    import traceback
+    send(f"❌ Ката калды: {e}")
