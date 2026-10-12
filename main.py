@@ -1,68 +1,62 @@
-import os, requests, time, threading, yfinance as yf
-import pandas as pd
+import os, requests, time, threading
 from flask import Flask
+import yfinance as yf
+import pandas as pd
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "@xauusdakyl")
-
 app = Flask(__name__)
+
 @app.route("/")
-def home(): return "USOIL PRO LIVE - @xauusdakyl"
+def home():
+    return "USOIL PRO LIVE OK"
 
 def send(msg):
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        r = requests.post(url, json={"chat_id": CHANNEL_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
-        print(f"SEND -> {r.text}")
+        data = {"chat_id": CHANNEL_ID, "text": msg, "parse_mode": "Markdown"}
+        r = requests.post(url, json=data, timeout=15)
+        print(f"SEND STATUS: {r.status_code} {r.text[:200]}")
     except Exception as e:
-        print(f"SEND ERROR {e}")
+        print(f"SEND ERR {e}")
 
-def get_rsi(series, period=14):
-    delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
+def get_rsi(s, p=14):
+    d = s.diff()
+    g = d.where(d>0,0).rolling(p).mean()
+    l = -d.where(d<0,0).rolling(p).mean()
+    rs = g/l
+    return 100-(100/(1+rs))
 
-def check_loop():
-    time.sleep(10)
-    send(f"✅ *USOIL BOT ИШКЕ КИРДИ*\nКанал: {CHANNEL_ID}\nБааны текшерип баштайт...")
+def worker():
+    time.sleep(5)
+    send("✅ *USOIL BOT ИШКЕ КИРДИ*\nБот Live болду, баа текшерилет.")
     while True:
         try:
-            # USOIL баасы - CL=F (Crude Oil Futures)
-            data = yf.download("CL=F", period="5d", interval="1h", progress=False)
-            if len(data) < 60:
+            df = yf.download("CL=F", period="5d", interval="1h", progress=False)
+            close = df['Close']
+            if len(close) < 55:
                 time.sleep(60)
                 continue
-
-            close = data['Close']
-            ema50 = close.ewm(span=50).mean().iloc[-1]
-            rsi = get_rsi(close).iloc[-1]
             price = float(close.iloc[-1])
+            ema50 = float(close.ewm(span=50).mean().iloc[-1])
+            rsi = float(get_rsi(close).iloc[-1])
+            print(f"CHECK ${price:.2f} RSI {rsi:.0f} EMA {ema50:.2f}")
 
-            # Логика
-            if isinstance(price, pd.Series): price = price.iloc[0]
-            if isinstance(ema50, pd.Series): ema50 = ema50.iloc[0]
-            if isinstance(rsi, pd.Series): rsi = rsi.iloc[0]
+            sig = None
+            if price > ema50 and 55 < rsi < 75:
+                sig = "LONG 🟢"
+            elif price < ema50 and 25 < rsi < 45:
+                sig = "SHORT 🔴"
 
-            signal = None
-            if price > ema50 and rsi > 55 and rsi < 75:
-                signal = "LONG 🟢"
-            elif price < ema50 and rsi < 45 and rsi > 25:
-                signal = "SHORT 🔴"
-
-            log = f"CHECK ${price:.2f} RSI {rsi:.0f} EMA50 {ema50:.2f} {signal or 'WAIT'}"
-            print(log)
-
-            if signal:
-                msg = f"🛢️ *USOIL / WTI PRO SIGNAL*\n\n💰 Баа: ${price:.2f}\n📊 RSI: {rsi:.0f}\n📈 EMA50: ${ema50:.2f}\n\n🎯 СИГНАЛ: *{signal}*\n\n⏰ {time.strftime('%H:%M %d-%m-%Y')} Bishkek\n📢 @xauusdakyl"
-                send(msg)
+            if sig:
+                txt = f"🛢️ *USOIL / WTI SIGNAL*\n\n💰 ${price:.2f}\n📊 RSI {rsi:.0f}\n📈 EMA50 {ema50:.2f}\n\n🎯 *{sig}*\n\n⏰ {time.strftime('%H:%M %d-%m-%Y')} Bishkek\n📢 @xauusdakyl"
+                send(txt)
 
         except Exception as e:
-            print(f"ERROR {e}")
-        time.sleep(1800) # ар 30 мүнөттө текшер
+            print(f"LOOP ERR {e}")
+        time.sleep(1800)
 
-threading.Thread(target=check_loop, daemon=True).start()
+threading.Thread(target=worker, daemon=True).start()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
