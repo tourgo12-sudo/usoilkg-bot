@@ -1,3 +1,2 @@
-yfinance
+flask
 requests
-pandas
