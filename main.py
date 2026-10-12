@@ -1,50 +1,95 @@
-import yfinance as yf, pandas as pd, requests, os
+import os, time, threading, requests
+from flask import Flask
+import math
+
 TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = "@xauusdakyl"
+CHANNEL = "@usoilkg" # өзүңдүн мунай каналың
+SYMBOL = "CL=F" # US Crude Oil
+app = Flask(__name__)
+LAST_SIGNAL = 0
 
-def send(t):
-    requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                 params={"chat_id": CHAT_ID, "text": t, "parse_mode": "HTML"}, timeout=20)
+def send(msg):
+    if not TOKEN: return
+    try:
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+        json={"chat_id": CHANNEL, "text": msg, "parse_mode":"HTML"}, timeout=10)
+    except: pass
 
-try:
-    df = yf.download("CL=F", period="5d", interval="15m", auto_adjust=True)
-    close = df['Close'].values.flatten()
-    
-    s = pd.Series(close)
-    delta = s.diff()
-    gain = delta.clip(lower=0).rolling(14).mean()
-    loss = -delta.clip(upper=0).rolling(14).mean()
-    rsi = 100 - (100 / (1 + gain/loss))
-    rsi_now = float(rsi.iloc[-1])
-    ema50 = float(s.ewm(span=50).mean().iloc[-1])
-    ema200 = float(s.ewm(span=200).mean().iloc[-1])
-    price = float(close[-1])
+def get_candles():
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{SYMBOL}?interval=15m&range=5d"
+        j = requests.get(url, headers={"User-Agent":"Mozilla/5.0"}, timeout=10).json()
+        closes = [c for c in j['chart']['result'][0]['indicators']['quote'][0]['close'] if c is not None]
+        return closes
+    except: return None
 
-    # 100% СТРАТЕГИЯ - US CRUDE OIL
-    if price > ema50 > ema200 and 55 < rsi_now < 75:
-        sl = price * 0.993
-        tp1 = price * 1.008
-        tp2 = price * 1.018
-        msg = f"""🛢️ <b>US crude oil 100% LONG</b>
-💰 Entry: ${price:.2f}
-❌ SL: ${sl:.2f}
-✅ TP1: ${tp1:.2f}
-✅ TP2: ${tp2:.2f}
-📊 RSI: {rsi_now:.1f} | EMA50: ${ema50:.2f}
-RR 1:2.5"""
-        send(msg)
-    elif price < ema50 < ema200 and 25 < rsi_now < 45:
-        sl = price * 1.007
-        tp1 = price * 0.992
-        tp2 = price * 0.982
-        msg = f"""🛢️ <b>US crude oil 100% SHORT</b>
-💰 Entry: ${price:.2f}
-❌ SL: ${sl:.2f}
-✅ TP1: ${tp1:.2f}
-✅ TP2: ${tp2:.2f}
-📊 RSI: {rsi_now:.1f} | EMA50: ${ema50:.2f}
-RR 1:2.5"""
-        send(msg)
+def ema(data, n):
+    if len(data)<n: return sum(data)/len(data)
+    k=2/(n+1); e=sum(data[:n])/n
+    for p in data[n:]: e=p*k+e*(1-k)
+    return e
 
-except Exception as e:
-    send(f"❌ {e}")
+def rsi(data, n=14):
+    gains=losses=0
+    for i in range(1,n+1):
+        d=data[-i]-data[-i-1]
+        if d>0: gains+=d
+        else: losses-=d
+    if losses==0: return 70
+    rs=(gains/n)/(losses/n)
+    return 100-(100/(1+rs))
+
+def loop():
+    global LAST_SIGNAL
+    print("USOIL PRO STARTED", flush=True)
+    time.sleep(10)
+    while True:
+        try:
+            closes=get_candles()
+            if closes and len(closes)>200:
+                price=closes[-1]
+                ema50=ema(closes,50)
+                ema200=ema(closes,200)
+                r=rsi(closes)
+                atr=sum(abs(closes[i]-closes[i-1]) for i in range(-14,0))/14
+
+                # 100% СТРАТЕГИЯ - SENIKИ, БИРОК КУЧОТУЛГОН
+                side=None
+                if price > ema50 > ema200 and 55 < r < 75:
+                    side="LONG"
+                elif price < ema50 < ema200 and 25 < r < 45:
+                    side="SHORT"
+
+                print(f"CHECK ${price:.2f} RSI {r:.0f} EMA50 {ema50:.2f} {side}", flush=True)
+
+                if side and (time.time()-LAST_SIGNAL)>5400: # 1.5 саатта 1 сигнал
+                    if side=="LONG":
+                        sl=price-atr*1.2
+                        tp1=price+atr*1.5
+                        tp2=price+atr*3
+                    else:
+                        sl=price+atr*1.2
+                        tp1=price-atr*1.5
+                        tp2=price-atr*3
+
+                    emoji="🛢️🟢 LONG 100%" if side=="LONG" else "🛢️🔴 SHORT 100%"
+                    txt=f"<b>{emoji}</b>\n\n"
+                    txt+=f"<b>Entry:</b> ${price:.2f}\n"
+                    txt+=f"<b>❌ SL:</b> ${sl:.2f}\n"
+                    txt+=f"<b>✅ TP1:</b> ${tp1:.2f}\n"
+                    txt+=f"<b>✅ TP2:</b> ${tp2:.2f}\n\n"
+                    txt+=f"<b>📊 RSI:</b> {r:.1f} | <b>EMA50:</b> ${ema50:.2f}\n"
+                    txt+=f"RR 1:2.5 🔥\n\n#USOIL #OIL"
+                    send(txt)
+                    LAST_SIGNAL=time.time()
+        except Exception as e:
+            print(f"err {e}", flush=True)
+        time.sleep(300)
+
+threading.Thread(target=loop, daemon=True).start()
+
+@app.route("/")
+def home(): return "USOIL PRO Live"
+
+if __name__=="__main__":
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT",10000)))
