@@ -6,7 +6,7 @@ DISPLAY="USOIL"
 SYMBOL="CL=F"
 app=Flask(__name__)
 @app.route('/')
-def home(): return "CRUDE OIL YFINANCE LIVE"
+def home(): return "CRUDE OIL PERCENT LIVE"
 LAST=0
 def send(m):
     try:
@@ -19,15 +19,34 @@ def send(m):
 def get_candles():
     try:
         df=yf.download(SYMBOL,period="5d",interval="5m",progress=False,auto_adjust=True)
-        if len(df)<120: return [],[],[],[]
-        c=df['Close'].tolist()
-        h=df['High'].tolist()
-        l=df['Low'].tolist()
-        v=df['Volume'].tolist()
-        return c[-150:],h[-150:],l[-150:],v[-150:]
+        if len(df)>=120:
+            try:
+                c=df['Close'].values.flatten().tolist()
+                h=df['High'].values.flatten().tolist()
+                l=df['Low'].values.flatten().tolist()
+                v=df['Volume'].values.flatten().tolist()
+            except:
+                c=df['Close'].iloc[:,0].values.tolist()
+                h=df['High'].iloc[:,0].values.tolist()
+                l=df['Low'].iloc[:,0].values.tolist()
+                v=df['Volume'].iloc[:,0].values.tolist()
+            return c[-150:],h[-150:],l[-150:],v[-150:]
     except Exception as e:
-        print(f"CANDLE ERR {e}",flush=True)
-        return [],[],[],[]
+        print(f"YF ERR {e}",flush=True)
+    try:
+        url=f"https://query1.finance.yahoo.com/v8/finance/chart/{SYMBOL}?interval=5m&range=5d"
+        j=requests.get(url,headers={"User-Agent":"Mozilla/5.0"},timeout=15).json()
+        res=j["chart"]["result"][0]
+        q=res["indicators"]["quote"][0]
+        c=[x for x in q["close"] if x is not None]
+        h=[x for x in q["high"] if x is not None]
+        l=[x for x in q["low"] if x is not None]
+        v=[x for x in q["volume"] if x is not None]
+        if len(c)>120:
+            return c[-150:],h[-150:],l[-150:],v[-150:]
+    except Exception as e:
+        print(f"YAHOO ERR {e}",flush=True)
+    return [],[],[],[]
 def rsi(c,p=14):
     g=l_=0.0
     for i in range(1,p+1):
@@ -47,7 +66,8 @@ def loop():
         try:
             c,h,l,v=get_candles()
             if len(c)<120:
-                time.sleep(60); continue
+                print(f"WAIT CANDLES {len(c)}",flush=True)
+                time.sleep(60);continue
             price=c[-1];e20=ema(c,20);e50=ema(c,50);e200=ema(c,200);r=rsi(c);e12=ema(c,12);e26=ema(c,26);macd=e12-e26
             vol_avg=sum(v[-20:])/20 if len(v)>=20 else 1
             buy=sell=0
@@ -66,13 +86,4 @@ def loop():
                 risk=0.35
                 if sig=="BUY":
                     sl=price-risk;tp1=price+risk;tp2=price+risk*2;tp3=price+risk*3
-                    msg="<b>"+DISPLAY+" "+sig+" "+str(best)+"%</b>\n\nBuy at: "+f"{price:.2f}"+"\nSL: "+f"{sl:.2f}"+"\nTP1: "+f"{tp1:.2f}"+"\nTP2: "+f"{tp2:.2f}"+"\nTP3: "+f"{tp3:.2f}"+"\n\nRSI:"+f"{r:.0f}"+" #USOIL"
-                else:
-                    sl=price+risk;tp1=price-risk;tp2=price-risk*2;tp3=price-risk*3
-                    msg="<b>"+DISPLAY+" "+sig+" "+str(best)+"%</b>\n\nSell at: "+f"{price:.2f}"+"\nSL: "+f"{sl:.2f}"+"\nTP1: "+f"{tp1:.2f}"+"\nTP2: "+f"{tp2:.2f}"+"\nTP3: "+f"{tp3:.2f}"+"\n\nRSI:"+f"{r:.0f}"+" #USOIL"
-                if send(msg): LAST=time.time()
-            time.sleep(60)
-        except Exception as e:
-            print(f"LOOP ERR {e}",flush=True);time.sleep(30)
-threading.Thread(target=loop,daemon=True).start()
-if __name__=="__main__": app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
+                    msg="<b>"+DISPLAY+" "+sig+" "+str(best)+"%</b>\n\nBuy at: "+f"{price:.
